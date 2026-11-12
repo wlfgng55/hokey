@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Air Hokey Online</title>
+<style>
+:root{--bg:#f3f5f9;--fg:#141a26;--card:#fff;--mut:#5b6578;--acc:#e8402a;--bd:#d5dae4}
+@media (prefers-color-scheme:dark){:root{--bg:#0e1118;--fg:#eef1f7;--card:#181d29;--mut:#9aa4b8;--bd:#2a3142}}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overflow:hidden;touch-action:none;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+#lobby{height:100%;display:flex;align-items:center;justify-content:center;padding:16px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:16px;padding:24px;width:100%;max-width:380px}
+h1{margin:0 0 4px;font-size:26px}
+p.sub{margin:0 0 18px;color:var(--mut);font-size:14px}
+label{display:block;font-size:13px;color:var(--mut);margin:12px 0 4px}
+input{width:100%;padding:12px;font-size:16px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);color:var(--fg)}
+button{font:inherit;font-weight:600;padding:12px 16px;border:0;border-radius:10px;background:var(--acc);color:#fff;cursor:pointer;width:100%;margin-top:16px}
+#err{color:var(--acc);font-size:13px;margin-top:12px;min-height:18px}
+#game{display:none;height:100%;flex-direction:column;align-items:center}
+.bar{width:100%;display:flex;justify-content:space-between;padding:6px 14px;font-weight:600;font-size:15px}
+#wrap{flex:1;width:100%;display:flex;align-items:center;justify-content:center;position:relative;min-height:0}
+canvas{display:block;border-radius:14px}
+#msg{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);text-align:center;pointer-events:none;font-size:20px;font-weight:700;color:#fff;text-shadow:0 2px 8px rgba(0,0,0,.7);padding:0 20px}
+#msg button{pointer-events:auto;width:auto;margin-top:12px}
+</style>
+</head>
+<body>
+<div id="lobby"><div class="card">
+<h1>Air Hokey Online</h1>
+<p class="sub">Arkadaşınla aynı oda kodunu gir. İlk 7 golü atan kazanır.</p>
+<label for="nm">Adın</label><input id="nm" maxlength="14" placeholder="Adını yaz" autocomplete="off">
+<label for="cd">Oda kodu</label><input id="cd" maxlength="12" placeholder="örn. ABCD (boşsa yeni oda kurulur)" autocomplete="off">
+<button id="go">Oyuna gir</button>
+<div id="err"></div>
+</div></div>
+<div id="game">
+<div class="bar"><span id="oN">Rakip</span><span id="oS">0</span></div>
+<div id="wrap"><canvas id="cv"></canvas><div id="msg"></div></div>
+<div class="bar"><span id="mN">Sen</span><span id="mS">0</span></div>
+</div>
+<script>
+(function(){
+var W=400,H=700,PR=34,BR=20,WIN=7,GW=150;
+var $=function(i){return document.getElementById(i)};
+var cv=$('cv'),ctx=cv.getContext('2d'),msgEl=$('msg');
+var ws=null,role=0,code='',myName='',scale=1,joined=false;
+var me={x:W/2,y:H-110,tx:W/2,ty:H-110};
+var opp={x:W/2,y:110,tx:W/2,ty:110};
+var puck={x:W/2,y:H/2,vx:0,vy:0};
+var sc=[0,0],st='wait',names=['',''],bothHere=false,lastMsg='',lastSend=0;
+try{$('nm').value=localStorage.getItem('hk_name')||''}catch(e){}
+
+$('go').onclick=function(){
+  myName=$('nm').value.trim()||'Oyuncu';
+  code=$('cd').value.trim().toLowerCase().replace(/[^a-z0-9]/g,'');
+  if(!code){code=Math.random().toString(36).slice(2,6);$('cd').value=code}
+  try{localStorage.setItem('hk_name',myName)}catch(e){}
+  $('err').textContent='Bağlanıyor…';
+  var proto=location.protocol==='https:'?'wss://':'ws://';
+  ws=new WebSocket(proto+location.host);
+  ws.onopen=function(){ws.send(JSON.stringify({t:'join',code:code,name:myName}))};
+  ws.onmessage=function(e){var m=JSON.parse(e.data);
+    if(m.t==='err'){$('err').textContent=m.msg;ws.close();return}
+    if(m.t==='hello'){role=m.role;enter()}
+    if(m.t==='s')onState(m)};
+  ws.onclose=function(){if(joined){bothHere=false;st='wait';lastMsg='';msgEl.innerHTML='Bağlantı koptu. Sayfayı yenile.'}else $('err').textContent='Bağlanılamadı, tekrar dene.'};
+};
+function enter(){
+  joined=true;$('lobby').style.display='none';$('game').style.display='flex';
+  if(role===1){me.x=me.tx=W/2;me.y=me.ty=110;opp.x=opp.tx=W/2;opp.y=opp.ty=H-110}
+  $('mN').textContent=myName;resize();last=performance.now();requestAnimationFrame(loop);
+}
+function onState(m){
+  var o=role===0?m.p1:m.p0;opp.tx=o[0];opp.ty=o[1];
+  puck.x+=(m.bx-puck.x)*.6;puck.y+=(m.by-puck.y)*.6;puck.vx=m.vx;puck.vy=m.vy;
+  sc=m.sc;st=m.st;names=m.names;bothHere=!!(m.names[0]&&m.names[1]);
+}
+function setTarget(e){
+  var r=cv.getBoundingClientRect();
+  var x=(e.clientX-r.left)/r.width*W,y=(e.clientY-r.top)/r.height*H;
+  if(role===1){x=W-x;y=H-y}
+  me.tx=Math.max(PR,Math.min(W-PR,x));
+  me.ty=role===0?Math.max(H/2+PR,Math.min(H-PR,y)):Math.max(PR,Math.min(H/2-PR,y));
+  var n=performance.now();
+  if(ws&&ws.readyState===1&&n-lastSend>25){lastSend=n;ws.send(JSON.stringify({t:'move',x:me.tx,y:me.ty}))}
+}
+var down=false;
+cv.addEventListener('pointerdown',function(e){down=true;cv.setPointerCapture(e.pointerId);setTarget(e)});
+cv.addEventListener('pointermove',function(e){if(down||e.pointerType==='mouse')setTarget(e)});
+cv.addEventListener('pointerup',function(){down=false});
+function resize(){
+  var w=$('wrap'),aw=w.clientWidth-8,ah=w.clientHeight-8;
+  scale=Math.min(aw/W,ah/H);if(!(scale>0))scale=.5;
+  var d=window.devicePixelRatio||1;
+  cv.style.width=W*scale+'px';cv.style.height=H*scale+'px';
+  cv.width=W*scale*d;cv.height=H*scale*d;
+}
+window.addEventListener('resize',resize);
+var last=0;
+function loop(now){
+  var dt=Math.min(.05,Math.max(.001,(now-last)/1000));last=now;
+  var k=Math.min(1,dt*28);
+  me.x+=(me.tx-me.x)*k;me.y+=(me.ty-me.y)*k;opp.x+=(opp.tx-opp.x)*k;opp.y+=(opp.ty-opp.y)*k;
+  if(st==='play'){puck.x+=puck.vx*dt;puck.y+=puck.vy*dt}
+  draw();ui();requestAnimationFrame(loop);
+}
+function paddle(p,c){
+  ctx.fillStyle=c;ctx.beginPath();ctx.arc(p.x,p.y,PR,0,7);ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,.35)';ctx.beginPath();ctx.arc(p.x,p.y,PR*.5,0,7);ctx.fill();
+  ctx.strokeStyle='rgba(0,0,0,.35)';ctx.lineWidth=3;ctx.beginPath();ctx.arc(p.x,p.y,PR,0,7);ctx.stroke();
+}
+function draw(){
+  var s=scale*(window.devicePixelRatio||1);
+  ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,cv.width,cv.height);
+  if(role===1)ctx.setTransform(-s,0,0,-s,W*s,H*s);else ctx.setTransform(s,0,0,s,0,0);
+  var g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,'#10243d');g.addColorStop(1,'#0a1a2e');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle='rgba(120,190,255,.55)';ctx.lineWidth=3;
+  ctx.beginPath();ctx.moveTo(0,H/2);ctx.lineTo(W,H/2);ctx.stroke();
+  ctx.beginPath();ctx.arc(W/2,H/2,60,0,7);ctx.stroke();
+  ctx.fillStyle='rgba(255,90,70,.9)';ctx.fillRect(W/2-GW/2,0,GW,6);ctx.fillRect(W/2-GW/2,H-6,GW,6);
+  ctx.strokeStyle='rgba(255,255,255,.25)';ctx.lineWidth=6;ctx.strokeRect(0,0,W,H);
+  ctx.fillStyle='#f4f4f4';ctx.beginPath();ctx.arc(puck.x,puck.y,BR,0,7);ctx.fill();
+  ctx.strokeStyle='#888';ctx.lineWidth=3;ctx.stroke();
+  paddle(role===0?me:opp,'#ff5a46');paddle(role===0?opp:me,'#3da0ff');
+}
+function ui(){
+  var o=1-role;
+  $('oN').textContent=names[o]||'Rakip';$('oS').textContent=sc[o];$('mS').textContent=sc[role];
+  var m='',btn=false;
+  if(!bothHere)m='Rakip bekleniyor…<br><small>Oda kodu: '+code.toUpperCase()+'</small>';
+  else if(st==='pause')m='Hazır!';
+  else if(st==='over'){m=(sc[role]>=WIN?'Kazandın! 🎉':'Kaybettin')+'<br><small>'+sc[role]+' - '+sc[o]+'</small>';btn=true}
+  var key=m+btn;if(key===lastMsg)return;lastMsg=key;
+  msgEl.innerHTML=m+(btn?'<br><button id="rm">Tekrar oyna</button>':'');
+  var b=$('rm');if(b)b.onclick=function(){ws.send(JSON.stringify({t:'again'}))};
+}
+})();
+</script>
+</body>
+</html>
